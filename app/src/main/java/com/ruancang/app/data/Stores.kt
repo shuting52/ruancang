@@ -131,16 +131,25 @@ object ThemeParser {
     }
 
     private fun findProp(code: String, selectorHint: String, prop: String): Color? {
-        return try { findPropUnsafe(code, selectorHint, prop) } catch (e: Exception) { null } catch (e: StackOverflowError) { null }
-    }
-
-    private fun findPropUnsafe(code: String, selectorHint: String, prop: String): Color? {
-        val block = Regex("([^{}]*$selectorHint[^{}]*)\\{([^}]*)}")
-            .findAll(code).firstOrNull() ?: return null
-        val body = block.groupValues[2]
-        val m = Regex("$prop\\s*:\\s*(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|rgba?\\s*\\([^)]+\\))")
-            .find(body) ?: return null
-        return colorFromValue(m.groupValues[1])
+        // v1.0.8 闪退修复：之前这里用 ([^{}]*hint[^{}]*)\{([^}]*)} 做 findAll，
+        // 在一段没有 CSS 大括号的 HTML 正文里（比如只粘了聊天 HTML 结构），
+        // hint 这个词每出现一次，正则就要从当前位置一路试到下一个大括号或文末，
+        // 大段 HTML 下是平方级扫描，启动时解析保存过的主题代码就可能卡死甚至被系统杀掉闪退。
+        // 现在改按 } 切规则、逐条看是否含 hint 再取 { 后的体，线性扫描，不回溯。
+        // 另外：调用方只在有 <style> 块时才调 findProp（见 parse），
+        // 没有 style 块的纯 HTML 本来就没有 CSS 规则可找，没必要扫全文。
+        return try {
+            for (rule in code.split("}")) {
+                if (!rule.contains(selectorHint)) continue
+                val brace = rule.indexOf("{")
+                if (brace < 0) continue
+                val body = rule.substring(brace + 1)
+                val m = Regex("$prop\s*:\s*(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|rgba?\s*\([^)]+\))")
+                    .find(body) ?: continue
+                colorFromValue(m.groupValues[1])?.let { return it }
+            }
+            null
+        } catch (e: Exception) { null } catch (e: StackOverflowError) { null }
     }
 
     private fun luminance(c: Color): Float =
@@ -163,12 +172,15 @@ object ThemeParser {
         if (code.isBlank()) return NeuThemeColors.Default
         val styles = Regex("<style[^>]*>(.*?)</style>", RegexOption.DOT_MATCHES_ALL)
             .findAll(code).map { it.groupValues[1] }.toList()
-        val style = if (styles.isNotEmpty()) styles.joinToString("\n") else code
+        val hasStyle = styles.isNotEmpty()
+        // v1.0.8：style 文本超过 100KB 只取前 100KB 解析，token 一般都在文件头，
+        // 后面再长也不值得让启动时全量扫一遍。
+        val style = if (hasStyle) styles.joinToString("\n").take(100 * 1024) else code
         val corner = Regex("--(?:r|radius|border-radius|corner)\\s*:\\s*([0-9]+)px").find(style)
             ?.groupValues?.get(1)?.toFloatOrNull() ?: NeuThemeColors.Default.corner
         val bg = findVar(style, "bg")
-            ?: findProp(style, "body", "background-color")
-            ?: findProp(style, "body", "background")
+            ?: (if (hasStyle) findProp(style, "body", "background-color") else null)
+            ?: (if (hasStyle) findProp(style, "body", "background") else null)
             ?: NeuThemeColors.Default.bg
         var text = findVar(style, "txt") ?: NeuThemeColors.Default.text
         var textDark = findVar(style, "txt-d") ?: NeuThemeColors.Default.textDark
@@ -180,9 +192,9 @@ object ThemeParser {
             if (luminance(text) > 0.85f) text = NeuThemeColors.Default.text
         }
         val blue = findVar(style, "blue")
-            ?: findProp(style, "primary", "background")
-            ?: findProp(style, "btn", "background")
-            ?: findProp(style, "button", "background")
+            ?: (if (hasStyle) findProp(style, "primary", "background") else null)
+            ?: (if (hasStyle) findProp(style, "btn", "background") else null)
+            ?: (if (hasStyle) findProp(style, "button", "background") else null)
             ?: NeuThemeColors.Default.blue
         return NeuThemeColors(
             bg = bg,

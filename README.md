@@ -207,8 +207,8 @@ App 的做法是：**App 本身不设大小上限，超过 API 单文件上限�
 
 | 文件大小 | App 的做法 |
 |---|---|
-| < 45 MB | 一次 Contents API PUT 直传，原文件名不变 |
-| ≥ 45 MB | 按 **45 MB 一块**切分，每块单独 PUT 为 `parts/part-001`、`part-002`……，并附一份 `manifest.json` |
+| < 10 MB | 一次流式上传，原文件名不变 |
+| ≥ 10 MB | 按 **10 MB 一块**切分，每块流式 PUT 为 `parts/part-001`、`part-002`……，并附一份 `manifest.json`（v1.0.3 起：Base64 流式编码，不拼大字符串，防 OOM） |
 
 大文件在仓库里的样子：
 

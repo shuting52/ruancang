@@ -62,15 +62,15 @@ fun chineseAppName(packageName: String, label: String): String =
 
 private fun drawableToBitmap(drawable: android.graphics.drawable.Drawable?): android.graphics.Bitmap? {
     if (drawable == null) return null
-    if (drawable is android.graphics.drawable.BitmapDrawable && drawable.bitmap != null) {
-        return drawable.bitmap
-    }
-    val w = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 96
-    val h = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 96
+    // v1.0.3：图标一律缩到 128px 再持有，不按原图尺寸持有。
+    // 之前按 intrinsic 尺寸原样持有，某张大图图标单张就能占几十 MB，
+    // 267 个应用的图标全留在列表里，也是 OOM 的帮凶。
+    // 128px × 128px × 4 字节 = 64KB 一张，267 张约 17MB。
     return try {
-        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        val size = 128
+        val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bitmap)
-        drawable.setBounds(0, 0, w, h)
+        drawable.setBounds(0, 0, size, size)
         drawable.draw(canvas)
         bitmap
     } catch (e: Exception) {
@@ -157,10 +157,10 @@ class UploadManager(private val api: GithubApi) {
         for (shotUri in target.screenshots) {
             val shotName = "shot-$shotIndex.jpg"
             context.contentResolver.openInputStream(shotUri)?.use { shotStream ->
-                val bytes = shotStream.readBytes()
-                api.uploadBytes(
+                // v1.0.3：截图也不再整张读进内存，改流式上传。
+                api.uploadStreamed(
                     "$basePath/screenshots/$shotName",
-                    bytes,
+                    shotStream,
                     "软仓：上传 $fileName 的截图 $shotName"
                 ).getOrThrow()
                 onLog("截图已同步：screenshots/$shotName")
@@ -204,8 +204,8 @@ class UploadManager(private val api: GithubApi) {
         onLog: (String) -> Unit
     ): String {
         onLog("开始上传主文件：$fileName" + if (totalSize > 0) "（${totalSize / 1024 / 1024} MB）" else "")
-        if (totalSize >= 45L * 1024 * 1024) {
-            onLog("超过 45 MB，自动切块上传（每块 45 MB），传完附 manifest.json")
+        if (totalSize >= 10L * 1024 * 1024) {
+            onLog("超过 10 MB，自动切块上传（每块 10 MB），传完附 manifest.json")
         }
         return api.uploadStream(
             basePath = basePath,

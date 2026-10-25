@@ -204,8 +204,10 @@ class UploadManager(private val api: GithubApi) {
         onLog: (String) -> Unit
     ): String {
         onLog("开始上传主文件：$fileName" + if (totalSize > 0) "（${totalSize / 1024 / 1024} MB）" else "")
-        if (totalSize >= 10L * 1024 * 1024) {
-            onLog("超过 10 MB，自动切块上传（每块 10 MB），传完附 manifest.json")
+        if (totalSize >= 90L * 1024 * 1024) {
+            onLog("超过 90 MB，自动切块上传（每块 10 MB），传完附 manifest.json")
+        } else if (totalSize > 0) {
+            onLog("90 MB 以下直接存单个文件，仓库里就是原文件本身")
         }
         return api.uploadStream(
             basePath = basePath,

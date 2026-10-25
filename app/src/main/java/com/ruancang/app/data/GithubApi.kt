@@ -15,10 +15,13 @@ import org.json.JSONObject
  * Token 只存在本机 SharedPreferences，绝不写进代码、绝不随源码提交。
  *
  * “不限制文件大小”是这样实现的（GitHub 侧的硬限制见 README）：
- *  - < 10 MB：一次流式上传，原文件名不变；
- *  - ≥ 10 MB：按 10 MB 一块切分，每块流式 PUT 为 .part 文件，
+ *  - < 90 MB：一次流式上传，原文件名不变，仓库里就是单个 APK 文件；
+ *  - ≥ 90 MB：按 10 MB 一块切分，每块流式 PUT 为 .part 文件，
  *    并附一份 manifest.json（原文件名、总大小、分块数、每块 SHA-256），
  *    下载方用 tools/reassemble.py 或 App 内“合并分块”拼回原文件。
+ *  之所以敢把单传阈值从 10MB 放到 90MB，是因为 v1.0.3 起上传是流式
+ *  Base64（24KB 一块边读边编码），不再整段拼大字符串，90MB 单传
+ *  峰值内存也只有十几 MB，不会重蹈 125,829,136 字节 OOM。
  * App 本身不设大小上限，分块数也不设上限。
  */
 data class GithubConfig(
@@ -102,6 +105,55 @@ class GithubApi(private val config: GithubConfig) {
         if (conn.responseCode !in 200..299) throw IllegalStateException("HTTP ${conn.responseCode}：$body".take(400))
         val content = JSONObject(body).optString("content").replace("\\s".toRegex(), "")
         if (content.isEmpty()) "" else String(Base64.decode(content, Base64.DEFAULT), Charsets.UTF_8)
+    }
+
+    /** 删仓库里一个文件（先取 sha 再 DELETE），不存在返回 false，不抛异常。 */
+    fun deleteFile(path: String, message: String): Boolean {
+        return try {
+            val sha = existingSha(path) ?: return false
+            val payload = JSONObject().apply {
+                put("message", message)
+                put("sha", sha)
+                put("branch", config.branch)
+            }
+            val conn = open("DELETE", "https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodePath(path)}")
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+            val body = readBody(conn)
+            conn.responseCode in 200..299
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 重传清理（尽力而为，清理失败不影响本次上传结果）：
+     *  - 单传成功后，若该条目之前是分块形态，删掉旧的 parts/* 和 manifest.json，
+     *    否则仓库里会同时留着单个 APK 和旧分块，看着像两份；
+     *  - 分块成功后，若该条目之前是单文件形态，删掉旧的单个文件。
+     */
+    private fun cleanupStaleChunked(basePath: String, fileName: String) {
+        try {
+            val manifestText = readFile("$basePath/manifest.json").getOrNull() ?: return
+            val manifest = JSONObject(manifestText)
+            if (manifest.optString("originalName") != fileName) return
+            val parts = manifest.optJSONArray("parts") ?: return
+            for (i in 0 until parts.length()) {
+                deleteFile("$basePath/parts/${parts.getString(i)}", "软仓：清理旧分块 ${parts.getString(i)}")
+            }
+            deleteFile("$basePath/manifest.json", "软仓：清理旧分块清单")
+        } catch (e: Exception) {
+            // 尽力而为
+        }
+    }
+
+    private fun cleanupStaleSingle(basePath: String, fileName: String) {
+        try {
+            deleteFile("$basePath/$fileName", "软仓：清理旧单文件")
+        } catch (e: Exception) {
+            // 尽力而为
+        }
     }
 
     /** 已存在文件先取 sha，PUT 时带上 sha 才是“更新”，不带会报 422。 */
@@ -197,17 +249,49 @@ class GithubApi(private val config: GithubConfig) {
         message: String,
         onProgress: (uploaded: Long, total: Long) -> Unit
     ): Result<String> = runCatching {
-        // v1.0.3：块从 45MB 降到 10MB，且全程只用同一块缓冲：
-        // 读满一块 -> 流式上传这一块 -> 再复用同一块读下一块。
-        // 旧版同时持有首块 + 当前块 + 下一块（3 × 45MB），再加 Base64 大字符串，
-        // 是这次 OOM 的直接原因。
+        // v1.0.5：单传阈值 90MB，分块大小仍是 10MB。
+        // 关键：不再用“读满 90MB 一块缓冲再判断”——那会一下占 90MB 内存。
+        // 大小已知时直接按大小分流；大小未知时先落盘到临时文件（磁盘，不占堆）
+        // 数清大小再分流，临时文件用完就删。
+        if (totalSize > 0) {
+            return@runCatching uploadWithKnownSize(basePath, fileName, input, totalSize, message, onProgress)
+        }
+        val tmp = java.io.File.createTempFile("ruancang-upload-", ".tmp")
+        try {
+            var counted = 0L
+            tmp.outputStream().use { out -> input.copyTo(out) }
+            counted = tmp.length()
+            java.io.FileInputStream(tmp).use { fileInput ->
+                return@runCatching uploadWithKnownSize(basePath, fileName, fileInput, counted, message, onProgress)
+            }
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun uploadWithKnownSize(
+        basePath: String,
+        fileName: String,
+        input: InputStream,
+        totalSize: Long,
+        message: String,
+        onProgress: (uploaded: Long, total: Long) -> Unit
+    ): String {
+        val singleThreshold = 90L * 1024 * 1024
+        if (totalSize < singleThreshold) {
+            // 90MB 以下：直接流式传单个文件，仓库里就是原 APK 文件。
+            val url = uploadStreamed("$basePath/$fileName", input, message).getOrThrow()
+            onProgress(totalSize, totalSize)
+            cleanupStaleChunked(basePath, fileName)
+            return url
+        }
+        // ≥ 90MB：按 10MB 一块切分，全程只用同一块缓冲（v1.0.3 的教训）。
         val chunkSize = 10L * 1024 * 1024
         val buf = ByteArray(chunkSize.toInt())
         var uploaded = 0L
         var partIndex = 1
         val partNames = ArrayList<String>()
         val digests = ArrayList<String>()
-        var first = true
         while (true) {
             var len = 0
             while (len < buf.size) {
@@ -216,15 +300,6 @@ class GithubApi(private val config: GithubConfig) {
                 len += n
             }
             if (len == 0) break
-            val isLast = len < buf.size
-            if (first && isLast) {
-                // 小文件：流在第一块内结束，直接传原文件，不分块。
-                val url = uploadStreamed("$basePath/$fileName", java.io.ByteArrayInputStream(buf, 0, len), message).getOrThrow()
-                uploaded = len.toLong()
-                onProgress(uploaded, totalSize)
-                return@runCatching url
-            }
-            first = false
             val partName = "part-%03d".format(partIndex)
             uploadStreamed("$basePath/parts/$partName", java.io.ByteArrayInputStream(buf, 0, len), "$message (part $partIndex)").getOrThrow()
             partNames += partName
@@ -232,11 +307,12 @@ class GithubApi(private val config: GithubConfig) {
             uploaded += len
             onProgress(uploaded, totalSize)
             partIndex++
-            if (isLast) break
+            if (len < buf.size) break
         }
         if (partNames.isEmpty()) {
-            // 空文件：传一个 0 字节原文件。
-            return@runCatching uploadStreamed("$basePath/$fileName", java.io.ByteArrayInputStream(ByteArray(0)), message).getOrThrow()
+            val url = uploadStreamed("$basePath/$fileName", java.io.ByteArrayInputStream(ByteArray(0)), message).getOrThrow()
+            cleanupStaleChunked(basePath, fileName)
+            return url
         }
         val manifest = JSONObject().apply {
             put("originalName", fileName)
@@ -246,7 +322,9 @@ class GithubApi(private val config: GithubConfig) {
             put("sha256", JSONArray(digests))
             put("note", "用 tools/reassemble.py 或 App 内合并功能按 parts 顺序拼回原文件")
         }
-        uploadBytes("$basePath/manifest.json", manifest.toString(2).toByteArray(Charsets.UTF_8), "$message (manifest)").getOrThrow()
+        val manifestUrl = uploadBytes("$basePath/manifest.json", manifest.toString(2).toByteArray(Charsets.UTF_8), "$message (manifest)").getOrThrow()
+        cleanupStaleSingle(basePath, fileName)
+        return manifestUrl
     }
 
     private fun sha256Hex(bytes: ByteArray, len: Int): String {

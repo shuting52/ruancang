@@ -1,0 +1,7 @@
+{
+  "versionCode": 3,
+  "versionName": "1.0.2",
+  "apkUrl": "https://raw.githubusercontent.com/shuting52/ruancang/main/dist/ruancang-v1.0.2-debug.apk",
+  "size": 15739294,
+  "changelog": "自更新弹窗：旧版里直接下载安装新版；已安装应用加图标、中文名和搜索；类别改 3 列，不再裁到屏幕外。"
+}

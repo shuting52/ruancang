@@ -144,7 +144,7 @@ object ThemeParser {
                 val brace = rule.indexOf("{")
                 if (brace < 0) continue
                 val body = rule.substring(brace + 1)
-                val m = Regex("$prop\s*:\s*(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|rgba?\s*\([^)]+\))")
+                val m = Regex("$prop\\s*:\\s*(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|rgba?\\s*\\([^)]+\\))")
                     .find(body) ?: continue
                 colorFromValue(m.groupValues[1])?.let { return it }
             }

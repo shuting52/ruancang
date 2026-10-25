@@ -81,16 +81,32 @@ object ThemeParser {
      * 全 App 的按钮、卡片、Tab、进度条立刻换成这套 token。
      * 想要整页 HTML 效果，请用“主题”页的 WebView 预览（见 README）。
      */
+    private fun luminance(c: Color): Float =
+        0.299f * c.red + 0.587f * c.green + 0.114f * c.blue
+
     fun parse(code: String): NeuThemeColors {
         if (code.isBlank()) return NeuThemeColors.Default
         val style = Regex("<style[^>]*>(.*?)</style>", RegexOption.DOT_MATCHES_ALL)
             .find(code)?.groupValues?.get(1) ?: code
         val corner = Regex("--r\\s*:\\s*([0-9]+)px").find(style)
             ?.groupValues?.get(1)?.toFloatOrNull() ?: NeuThemeColors.Default.corner
+        val bg = findVar(style, "bg") ?: NeuThemeColors.Default.bg
+        var text = findVar(style, "txt") ?: NeuThemeColors.Default.text
+        var textDark = findVar(style, "txt-d") ?: NeuThemeColors.Default.textDark
+        // v1.0.1：文字/背景冲突的兜底。只改了背景没改文字时，
+        // 深底配深字、浅底配浅字都会看不清，这里按背景亮度强制拉开对比：
+        // 深底 -> 文字一律提亮，浅底 -> 过浅的深色字压回默认深色。
+        if (luminance(bg) < 0.45f) {
+            if (luminance(text) < 0.6f) text = Color(0xFFC7D6E8)
+            if (luminance(textDark) < 0.6f) textDark = Color(0xFFF2F7FC)
+        } else {
+            if (luminance(textDark) > 0.6f) textDark = NeuThemeColors.Default.textDark
+            if (luminance(text) > 0.85f) text = NeuThemeColors.Default.text
+        }
         return NeuThemeColors(
-            bg = findVar(style, "bg") ?: NeuThemeColors.Default.bg,
-            text = findVar(style, "txt") ?: NeuThemeColors.Default.text,
-            textDark = findVar(style, "txt-d") ?: NeuThemeColors.Default.textDark,
+            bg = bg,
+            text = text,
+            textDark = textDark,
             blue = findVar(style, "blue") ?: NeuThemeColors.Default.blue,
             blueDark = findVar(style, "blue-d") ?: NeuThemeColors.Default.blueDark,
             gold = findVar(style, "gold") ?: NeuThemeColors.Default.gold,

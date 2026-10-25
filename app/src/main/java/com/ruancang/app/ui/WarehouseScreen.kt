@@ -1,15 +1,21 @@
 package com.ruancang.app.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -53,8 +60,10 @@ fun WarehouseScreen(
     val config = remember(tab) { settings.githubConfig }
 
     Box(modifier = Modifier.fillMaxSize().background(theme.bg)) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // 顶部栏：对应 HTML .appbar（logo 软 + 标题 + 副标题）
+        // v1.0.1：之前开了全屏沉浸却没留安全区，底部栏会被系统导航条盖住、
+        // 顶部会被状态栏盖住，设置 Tab 看着像没了。这里强制留出安全区。
+        Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+            // 顶部栏：对应 HTML .appbar（logo 软 + 标题 + 副标题 + 右上角设置按钮）
             Row(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -65,9 +74,13 @@ fun WarehouseScreen(
                         .background(theme.blue, RoundedCornerShape(50))
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) { Text("软", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp) }
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text("软仓", color = theme.textDark, fontWeight = FontWeight.Bold, fontSize = 17.sp, letterSpacing = 1.sp)
-                    Text("NEU UI · 柔影 · GitHub 仓库", color = theme.text, fontSize = 11.sp, letterSpacing = 1.sp)
+                    Text("NEU UI · 柔影 · GitHub 仓库", color = theme.textDark, fontSize = 11.sp, letterSpacing = 1.sp)
+                }
+                // v1.0.1：设置不再只靠底部 Tab，顶部常驻一个齿轮按钮
+                TextButton(onClick = { tab = Tab.SETTINGS }) {
+                    Text("⚙ 设置", color = theme.blueDark, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
             }
 
@@ -79,12 +92,17 @@ fun WarehouseScreen(
                 }
             }
 
-            // 底部 Tab 栏：悬浮胶囊（对应 HTML .tabbar）
+            // 底部 Tab 栏：v1.0.1 之前底栏和页面同色、无阴影无描边，
+            // 未选中字还是浅灰 theme.text，看着像一排淡字不是按钮。
+            // 现在给底栏加阴影+白描边，选中是蓝底白字，未选中是深色字。
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .background(theme.bg, RoundedCornerShape(32.dp)),
+                    .shadow(8.dp, RoundedCornerShape(32.dp))
+                    .background(theme.bg, RoundedCornerShape(32.dp))
+                    .border(BorderStroke(2.dp, Color.White.copy(alpha = 0.33f)), RoundedCornerShape(32.dp))
+                    .padding(vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 TabButton("仓库", tab == Tab.WAREHOUSE, theme) { tab = Tab.WAREHOUSE }
@@ -108,11 +126,19 @@ fun WarehouseScreen(
 
 @Composable
 private fun TabButton(text: String, selected: Boolean, theme: NeuThemeColors, onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
+    Box(
+        modifier = Modifier
+            .background(
+                if (selected) theme.blue else Color.Transparent,
+                RoundedCornerShape(24.dp)
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
         Text(
             text,
-            color = if (selected) theme.blueDark else theme.text,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+            color = if (selected) Color.White else theme.textDark,
+            fontWeight = FontWeight.Bold,
             fontSize = 13.sp
         )
     }
@@ -164,14 +190,18 @@ private fun WarehousePage(
             NeuChip("视频", selected == Category.VIDEOS, { selected = Category.VIDEOS; refresh() }, theme)
         }
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // v1.0.1：之前这排 6 个芯片没有横滑，窄屏上直接被裁掉。
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             Category.values().filter { it !in listOf(Category.APPS, Category.IMAGES, Category.VIDEOS) }.forEach { c ->
                 NeuChip("${c.emoji} ${c.label}", selected == c, { selected = c; refresh() }, theme)
             }
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-            Text(status, color = theme.text, fontSize = 12.sp)
+            Text(status, color = theme.textDark, fontSize = 12.sp)
             TextButton(onClick = { refresh() }) { Text(if (loading) "读取中…" else "刷新", color = theme.blueDark) }
         }
         Spacer(Modifier.height(6.dp))
@@ -191,8 +221,8 @@ private fun WarehousePage(
         }
         if (items.isEmpty() && !loading) {
             Spacer(Modifier.height(16.dp))
-            Text("仓库默认地址：github.com/${config.owner}/${config.repo}（分支 ${config.branch}）", color = theme.text, fontSize = 12.sp)
-            Text("上传后这里会按类别自动出现文件夹：apps / images / videos / documents / archives / code / fonts / others。", color = theme.text, fontSize = 12.sp, lineHeight = 17.sp)
+            Text("仓库默认地址：github.com/${config.owner}/${config.repo}（分支 ${config.branch}）", color = theme.textDark, fontSize = 12.sp)
+            Text("上传后这里会按类别自动出现文件夹：apps / images / videos / documents / archives / code / fonts / others。", color = theme.textDark, fontSize = 12.sp, lineHeight = 17.sp)
         }
     }
 }

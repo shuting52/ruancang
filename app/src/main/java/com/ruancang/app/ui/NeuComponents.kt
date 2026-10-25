@@ -53,9 +53,10 @@ fun NeuButton(
         border = BorderStroke(2.dp, Color.White.copy(alpha = 0.33f)),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (primary) theme.blue else theme.bg,
-            contentColor = if (primary) Color.White else theme.text,
+            // v1.0.1：非主按钮之前用浅灰 theme.text，浅底上几乎看不清，改深色字
+            contentColor = if (primary) Color.White else theme.textDark,
             disabledContainerColor = theme.bg,
-            disabledContentColor = theme.text.copy(alpha = 0.55f)
+            disabledContentColor = theme.textDark.copy(alpha = 0.55f)
         ),
         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp)
     ) {
@@ -110,7 +111,7 @@ fun NeuChip(
             text = text,
             fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
-            color = if (selected) theme.blueDark else theme.text
+            color = if (selected) theme.blueDark else theme.textDark
         )
     }
 }

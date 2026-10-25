@@ -170,7 +170,7 @@ fun UploadWindow(
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                 // 一行放不下全部类别时，LazyRow 更稳；这里用可换行近似：分两行芯片
                             }
-                            Category.values().chunked(4).forEach { row ->
+                            Category.entries.chunked(4).forEach { row ->
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     row.forEach { c ->
                                         NeuChip(

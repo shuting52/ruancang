@@ -88,6 +88,10 @@ data class UploadTarget(
 
 /** 从 PackageManager 列出已安装应用（默认先列用户应用，开关可放出系统应用）。 */
 fun listInstalledApps(context: Context, includeSystem: Boolean): List<UploadSource.InstalledApp> {
+    return try { listInstalledAppsUnsafe(context, includeSystem) } catch (e: Exception) { emptyList() } catch (e: StackOverflowError) { emptyList() }
+}
+
+private fun listInstalledAppsUnsafe(context: Context, includeSystem: Boolean): List<UploadSource.InstalledApp> {
     val pm: PackageManager = context.packageManager
     val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
     return apps

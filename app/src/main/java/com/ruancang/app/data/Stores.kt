@@ -97,7 +97,11 @@ object ThemeParser {
         }
         val rgb = Regex("rgba?\\s*\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)").find(v) ?: return null
         return try {
-            Color(rgb.groupValues[1].toInt(), rgb.groupValues[2].toInt(), rgb.groupValues[3].toInt())
+            Color(
+                rgb.groupValues[1].toInt().coerceIn(0, 255),
+                rgb.groupValues[2].toInt().coerceIn(0, 255),
+                rgb.groupValues[3].toInt().coerceIn(0, 255)
+            )
         } catch (e: Exception) { null }
     }
 
@@ -114,6 +118,10 @@ object ThemeParser {
     )
 
     private fun findVar(code: String, key: String): Color? {
+        return try { findVarUnsafe(code, key) } catch (e: Exception) { null } catch (e: StackOverflowError) { null }
+    }
+
+    private fun findVarUnsafe(code: String, key: String): Color? {
         for (name in ALIASES[key] ?: listOf(key)) {
             val regex = Regex("--$name\\s*:\\s*([^;\\n}]+)")
             val m = regex.find(code) ?: continue
@@ -123,6 +131,10 @@ object ThemeParser {
     }
 
     private fun findProp(code: String, selectorHint: String, prop: String): Color? {
+        return try { findPropUnsafe(code, selectorHint, prop) } catch (e: Exception) { null } catch (e: StackOverflowError) { null }
+    }
+
+    private fun findPropUnsafe(code: String, selectorHint: String, prop: String): Color? {
         val block = Regex("([^{}]*$selectorHint[^{}]*)\\{([^}]*)}")
             .findAll(code).firstOrNull() ?: return null
         val body = block.groupValues[2]
@@ -144,6 +156,10 @@ object ThemeParser {
     }
 
     fun parse(code: String): NeuThemeColors {
+        return try { parseUnsafe(code) } catch (e: Exception) { NeuThemeColors.Default } catch (e: StackOverflowError) { NeuThemeColors.Default } catch (e: OutOfMemoryError) { NeuThemeColors.Default }
+    }
+
+    private fun parseUnsafe(code: String): NeuThemeColors {
         if (code.isBlank()) return NeuThemeColors.Default
         val styles = Regex("<style[^>]*>(.*?)</style>", RegexOption.DOT_MATCHES_ALL)
             .findAll(code).map { it.groupValues[1] }.toList()
@@ -202,6 +218,10 @@ class ThemeViewModel {
     private val _colors = MutableStateFlow(NeuThemeColors.Default)
     val colors: StateFlow<NeuThemeColors> = _colors.asStateFlow()
 
-    fun applyCode(code: String) { _colors.value = ThemeParser.parse(code) }
+    fun applyCode(code: String) {
+        // v1.0.7 闪退加固：主题代码再怪也不能让 App 在启动时闪退，
+        // 解析失败就退回默认主题，绝不把异常抛到界面层。
+        _colors.value = try { ThemeParser.parse(code) } catch (t: Throwable) { NeuThemeColors.Default }
+    }
     fun reset() { _colors.value = NeuThemeColors.Default }
 }

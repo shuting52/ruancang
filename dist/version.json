@@ -1,7 +1,7 @@
 {
-  "versionCode": 11,
-  "versionName": "1.1.0",
-  "apkUrl": "https://raw.githubusercontent.com/shuting52/ruancang/main/dist/ruancang-v1.1.0-debug.apk",
+  "versionCode": 12,
+  "versionName": "1.1.1",
+  "apkUrl": "https://raw.githubusercontent.com/shuting52/ruancang/main/dist/ruancang-v1.1.1-debug.apk",
   "size": 15787345,
-  "changelog": "修 46MB 单文件上传死循环感：单文件阈值改回 10MB，超过即切块；每块单独重试 3 次，断了只重传这一块；unexpected end of stream 改中文提示；重试日志标明共 3 次、失败后已停止。"
+  "changelog": "主题页加上传代码文件：选手机里的 .html/.css/.txt 文件，读进来就直接应用到全局，不用粘贴；空文件和超过 1MB 的文件会提示。"
 }

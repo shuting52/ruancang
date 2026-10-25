@@ -94,6 +94,16 @@ class GithubApi(private val config: GithubConfig) {
         return out
     }
 
+    /** 读仓库里一个文本文件的内容（Base64 解码后），404 返回 null。 */
+    fun readFile(path: String): Result<String?> = runCatching {
+        val conn = open("GET", "https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodePath(path)}?ref=${config.branch}")
+        val body = readBody(conn)
+        if (conn.responseCode == 404) return@runCatching null
+        if (conn.responseCode !in 200..299) throw IllegalStateException("HTTP ${conn.responseCode}：$body".take(400))
+        val content = JSONObject(body).optString("content").replace("\\s".toRegex(), "")
+        if (content.isEmpty()) "" else String(Base64.decode(content, Base64.DEFAULT), Charsets.UTF_8)
+    }
+
     /** 已存在文件先取 sha，PUT 时带上 sha 才是“更新”，不带会报 422。 */
     private fun existingSha(path: String): String? {
         val conn = open("GET", "https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodePath(path)}?ref=${config.branch}")

@@ -109,7 +109,17 @@ fun WarehouseScreen(
             }
         }
     }
-    LaunchedEffect(Unit) { checkUpdate(false) }
+    LaunchedEffect(Unit) {
+        // v1.0.4：启动时清理残留更新 APK——上次下载的新版已经装上了
+        // （当前 code >= 下载时记下的 code），cache/update 里的 APK 和断点记录
+        // 就不再是“可续传的半成品”，而是残留，直接删掉。
+        val pending = settings.pendingUpdateCode
+        if (pending > 0 && currentCode >= pending) {
+            settings.cleanupUpdateCache(context)
+            settings.pendingUpdateCode = 0L
+        }
+        checkUpdate(false)
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(theme.bg)) {
         // v1.0.1：之前开了全屏沉浸却没留安全区，底部栏会被系统导航条盖住、
@@ -217,7 +227,23 @@ fun WarehouseScreen(
                             updateDownloading = false
                             updateDownloaded = true
                             updateProgress = 1f
-                            updateStatus = "下载完成，点“立即安装”。"
+                            // v1.0.4：下载完成即自动安装，不用再点一次。
+                            // 记下待安装 code，装上新版后下次启动自动清理残留 APK。
+                            settings.pendingUpdateCode = info.versionCode
+                            updateStatus = "下载完成，正在打开安装器…"
+                            // 直接调同一份安装逻辑（和“立即安装”按钮同一个入口）。
+                            try {
+                                val uri = FileProvider.getUriForFile(context, "com.ruancang.app.fileprovider", file)
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, "application/vnd.android.package-archive")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                                updateStatus = "安装器已打开，装完后下次打开 App 会自动清理缓存的安装包。"
+                            } catch (e: Exception) {
+                                updateStatus = "下载完成，但自动打开安装器失败：${e.message}，请点“立即安装”。"
+                            }
                         }
                     } catch (e: Exception) {
                         withContext(Dispatchers.Main) {
@@ -364,8 +390,10 @@ private fun SettingsPage(
     var repo by remember { mutableStateOf(settings.githubConfig.repo) }
     var branch by remember { mutableStateOf(settings.githubConfig.branch) }
     var token by remember { mutableStateOf(settings.githubConfig.token) }
+    var showToken by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
         NeuTitle("GitHub 连接", theme)
@@ -378,7 +406,23 @@ private fun SettingsPage(
         Spacer(Modifier.height(10.dp))
         NeuField(branch, { branch = it }, "分支 Branch", theme)
         Spacer(Modifier.height(10.dp))
-        NeuField(token, { token = it }, "GitHub Token（粘贴后只存本机）", theme, placeholder = "ghp_… 或 github_pat_…")
+        // v1.0.4：Token 默认以 •••• 遮挡呈现，点“显示”才明文；
+        // 保存时经 AndroidKeyStore AES/GCM 加密后才写入 SharedPreferences。
+        NeuField(
+            token, { token = it }, "GitHub Token（加密存储，默认遮挡）", theme,
+            placeholder = "ghp_… 或 github_pat_…",
+            isPassword = true, passwordVisible = showToken
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            NeuButton(
+                if (showToken) "隐藏 Token" else "显示 Token",
+                onClick = { showToken = !showToken }, theme = theme, modifier = Modifier.weight(1f)
+            )
+            NeuButton("清理更新缓存", onClick = {
+                val freed = settings.cleanupUpdateCache(ctx)
+                status = if (freed > 0) "已清理更新缓存 ${formatSize(freed)}。" else "没有可清理的更新缓存。"
+            }, theme = theme, modifier = Modifier.weight(1f))
+        }
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             NeuButton("保存", onClick = {
@@ -427,6 +471,27 @@ private fun SettingsPage(
 private fun ThemePage(theme: NeuThemeColors, settings: SettingsStore, themeVm: ThemeViewModel) {
     var code by remember { mutableStateOf(settings.customCode) }
     var summary by remember { mutableStateOf(ThemeParser.summary(code)) }
+    // v1.0.4 在线主题状态
+    var themeName by remember { mutableStateOf("我的主题") }
+    var onlineStatus by remember { mutableStateOf("") }
+    var onlineThemes by remember { mutableStateOf<List<com.ruancang.app.data.OnlineTheme>>(emptyList()) }
+    var onlineLoading by remember { mutableStateOf(false) }
+    val themeScope = rememberCoroutineScope()
+
+    fun refreshOnline() {
+        onlineLoading = true
+        onlineStatus = "正在读取在线主题列表…"
+        themeScope.launch(Dispatchers.IO) {
+            val r = com.ruancang.app.data.OnlineThemes.list(settings.githubConfig)
+            withContext(Dispatchers.Main) {
+                onlineLoading = false
+                r.onSuccess {
+                    onlineThemes = it
+                    onlineStatus = if (it.isEmpty()) "仓库里还没有在线主题，上传第一个吧。" else "在线主题 ${it.size} 个，点“应用”可直接下载并应用到全局。"
+                }.onFailure { e -> onlineStatus = "读取失败：${e.message}" }
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
         NeuTitle("自定义主题代码", theme)
@@ -464,6 +529,65 @@ private fun ThemePage(theme: NeuThemeColors, settings: SettingsStore, themeVm: T
                 }
                 NeuProgress(0.72f, theme)
                 Text("进度 72% · 卡片圆角 ${theme.corner.toInt()}px", color = theme.text, fontSize = 12.sp)
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+        // v1.0.4 在线主题：上传到仓库 + 从仓库拉回应用
+        NeuTitle("在线主题", theme)
+        Spacer(Modifier.height(6.dp))
+        Text("主题代码可以上传到仓库 themes/ 目录，换手机、重装后也能拉回来。上传需要 Token（设置页已填的那个），拉取列表和主题文件不需要 Token（仓库公开）。", color = theme.textDark, fontSize = 12.sp, lineHeight = 17.sp)
+        Spacer(Modifier.height(10.dp))
+        NeuField(themeName, { themeName = it }, "在线主题名称", theme, placeholder = "如：我的柔影蓝")
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            NeuButton("上传当前代码到仓库", onClick = {
+                if (code.isBlank()) { onlineStatus = "先在上面粘贴主题代码，再上传。"; return@NeuButton }
+                if (settings.githubConfig.token.isBlank()) { onlineStatus = "先去“设置”页填 GitHub Token，再上传。"; return@NeuButton }
+                onlineStatus = "正在上传…"
+                val name = themeName.ifBlank { "我的主题" }
+                val slug = com.ruancang.app.model.slugify(name)
+                themeScope.launch(Dispatchers.IO) {
+                    val r = com.ruancang.app.data.OnlineThemes.upload(settings.githubConfig, name, slug, code)
+                    withContext(Dispatchers.Main) {
+                        r.onSuccess { file ->
+                            onlineStatus = "✅ 已上传到仓库：$file，换设备后在下面列表点“应用”即可拉回。"
+                            refreshOnline()
+                        }.onFailure { e -> onlineStatus = "上传失败：${e.message}" }
+                    }
+                }
+            }, theme = theme, primary = true, modifier = Modifier.weight(1f))
+            NeuButton("刷新在线列表", onClick = { refreshOnline() }, theme = theme, modifier = Modifier.weight(1f))
+        }
+        if (onlineStatus.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Text(onlineStatus, color = theme.textDark, fontSize = 13.sp, lineHeight = 18.sp)
+        }
+        Spacer(Modifier.height(10.dp))
+        if (onlineLoading) {
+            Text("读取中…", color = theme.textDark, fontSize = 13.sp)
+        }
+        onlineThemes.forEach { t ->
+            Spacer(Modifier.height(8.dp))
+            NeuCard(theme = theme) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(t.name, color = theme.textDark, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(t.file, color = theme.textDark, fontSize = 12.sp)
+                    NeuButton("应用这个在线主题", onClick = {
+                        onlineStatus = "正在下载“${t.name}”…"
+                        themeScope.launch(Dispatchers.IO) {
+                            val r = com.ruancang.app.data.OnlineThemes.download(settings.githubConfig, t)
+                            withContext(Dispatchers.Main) {
+                                r.onSuccess { downloaded ->
+                                    code = downloaded
+                                    settings.customCode = downloaded
+                                    themeVm.applyCode(downloaded)
+                                    summary = ThemeParser.summary(downloaded)
+                                    onlineStatus = "✅ 已应用在线主题“${t.name}”。"
+                                }.onFailure { e -> onlineStatus = "下载失败：${e.message}" }
+                            }
+                        }
+                    }, theme = theme, primary = true)
+                }
             }
         }
         Spacer(Modifier.height(20.dp))

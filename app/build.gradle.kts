@@ -11,12 +11,31 @@ android {
         applicationId = "com.ruancang.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 5
+        versionName = "1.0.4"
         vectorDrawables { useSupportLibrary = true }
     }
 
+    // v1.0.4 固定签名：之前 CI 每次都在临时 Runner 上现生成 debug keystore，
+    // 每版签名都不一样，Android 认签名不认包名，签名一变就必须先卸载旧版才能装新版。
+    // 现把一个固定 debug keystore 随源码提交（keystore/ruancang-debug.keystore，
+    // 别名 androiddebugkey，口令 android，和 Android SDK 自带 debug key 同一级别，
+    // 本来就不是秘密，作用只是让每一版签名保持一致）。
+    // 注意：这只是 debug 签名，正式发布用的 release key 绝不能这样提交，
+    // 到时必须走 GitHub Secrets。
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("../keystore/ruancang-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

@@ -21,16 +21,35 @@ class SettingsStore(context: Context) {
             owner = prefs.getString("gh_owner", "shuting52") ?: "shuting52",
             repo = prefs.getString("gh_repo", "ruancang") ?: "ruancang",
             branch = prefs.getString("gh_branch", "main") ?: "main",
-            token = prefs.getString("gh_token", "") ?: ""
+            // v1.0.4：读出来的是解密后的明文（供 API 调用），
+            // 但 SharedPreferences 里存的是 ENC1: 加密串，老明文值也能照常读。
+            token = TokenCrypto.decrypt(prefs.getString("gh_token", "") ?: "")
         )
         set(value) {
             prefs.edit()
                 .putString("gh_owner", value.owner)
                 .putString("gh_repo", value.repo)
                 .putString("gh_branch", value.branch)
-                .putString("gh_token", value.token)
+                .putString("gh_token", TokenCrypto.encrypt(value.token))
                 .apply()
         }
+
+    /** 更新缓存清理：删 cache/update 下的残留 APK 和断点记录，返回清掉的字节数。 */
+    fun cleanupUpdateCache(context: android.content.Context): Long {
+        val dir = java.io.File(context.cacheDir, "update")
+        if (!dir.exists()) return 0L
+        var freed = 0L
+        dir.listFiles()?.forEach { f ->
+            freed += f.length()
+            f.delete()
+        }
+        return freed
+    }
+
+    /** 待安装的新版 code：下载完成时记下，装上新版后启动时据此清理残留 APK。 */
+    var pendingUpdateCode: Long
+        get() = prefs.getLong("pending_update_code", 0L)
+        set(value) { prefs.edit().putLong("pending_update_code", value).apply() }
 
     var customCode: String
         get() = prefs.getString("custom_code", "") ?: ""

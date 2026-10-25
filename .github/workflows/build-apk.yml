@@ -17,6 +17,28 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
+      # v1.0.4：显式用固定 keystore 以 V1+V2+V3 重签一次，并验签。
+      # Gradle 本身也会用同一 keystore 签，但 AGP 默认方案不保证三者齐全，
+      # 这里用 apksigner 明示三者全开，验签输出里三项都必须是 true。
+      # 固定签名的意义：签名不变，新版才能直接覆盖安装旧版，不用先卸载。
+      - name: Re-sign APK with V1+V2+V3
+        run: |
+          set -e
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          echo "apksigner: $APKSIGNER"
+          "$APKSIGNER" sign \
+            --ks keystore/ruancang-debug.keystore \
+            --ks-pass pass:android \
+            --ks-key-alias androiddebugkey \
+            --key-pass pass:android \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out app/build/outputs/apk/debug/app-debug-signed.apk \
+            "$APK"
+          mv app/build/outputs/apk/debug/app-debug-signed.apk "$APK"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

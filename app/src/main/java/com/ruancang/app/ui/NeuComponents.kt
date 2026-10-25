@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ruancang.app.data.NeuThemeColors
@@ -124,7 +126,11 @@ fun NeuField(
     theme: NeuThemeColors,
     modifier: Modifier = Modifier,
     singleLine: Boolean = true,
-    placeholder: String = ""
+    placeholder: String = "",
+    // v1.0.4：isPassword 为真时默认用密码遮挡（••••），
+    // passwordVisible 为真时才明文显示，供“显示/隐藏”切换用。
+    isPassword: Boolean = false,
+    passwordVisible: Boolean = false
 ) {
     OutlinedTextField(
         value = value,
@@ -132,6 +138,7 @@ fun NeuField(
         label = { Text(label, color = theme.textDark) },
         placeholder = { if (placeholder.isNotEmpty()) Text(placeholder, color = theme.text.copy(alpha = 0.6f)) },
         singleLine = singleLine,
+        visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         colors = TextFieldDefaults.colors(

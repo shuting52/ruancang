@@ -24,6 +24,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import android.content.Intent
 import androidx.compose.material3.Text
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -477,6 +479,41 @@ private fun ThemePage(theme: NeuThemeColors, settings: SettingsStore, themeVm: T
     var onlineThemes by remember { mutableStateOf<List<com.ruancang.app.data.OnlineTheme>>(emptyList()) }
     var onlineLoading by remember { mutableStateOf(false) }
     val themeScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    // v1.1.1：上传代码文件。选手机里的 .html/.css/.txt 文件，读进来就直接应用到全局，
+    // 不用再手动粘贴。读文件放 IO 线程，1MB 以上的文件直接拒掉，避免把大文件整段读进内存。
+    val pickCodeFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        themeScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val name = try {
+                    var displayName: String? = null
+                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (idx >= 0) displayName = cursor.getString(idx)
+                        }
+                    }
+                    displayName ?: "代码文件"
+                } catch (e: Exception) { "代码文件" }
+                val text = context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    ?: throw IllegalStateException("打不开这个文件")
+                if (text.isBlank()) throw IllegalStateException("这个文件是空的，没读到代码")
+                if (text.length > 1_000_000) throw IllegalStateException("文件太大（超过 1MB），只支持 1MB 以内的代码文件")
+                name to text
+            }
+            withContext(Dispatchers.Main) {
+                result.onSuccess { (name, text) ->
+                    code = text
+                    settings.customCode = text
+                    themeVm.applyCode(text)
+                    summary = "已从文件“$name”读取并应用到全局（${text.length} 字符）。\n" + ThemeParser.summary(text)
+                }.onFailure { e ->
+                    summary = "读取文件失败：${e.message}"
+                }
+            }
+        }
+    }
 
     fun refreshOnline() {
         onlineLoading = true
@@ -496,7 +533,7 @@ private fun ThemePage(theme: NeuThemeColors, settings: SettingsStore, themeVm: T
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
         NeuTitle("自定义主题代码", theme)
         Spacer(Modifier.height(6.dp))
-        Text("把 HTML / CSS 代码粘贴进来，点“应用”：App 会提取里面的 --bg / --primary / --blue / --txt 等设计 token，全局换到按钮、卡片、Tab、进度条上。只粘 HTML 结构、里面一个颜色都没有是提取不出东西的，必须连同 <style> 一起粘进来。", color = theme.text, fontSize = 12.sp, lineHeight = 17.sp)
+        Text("把 HTML / CSS 代码粘贴进来，点“应用”；或者直接点下面的“上传代码文件”，选手机里的 .html / .css / .txt 文件，读进来就直接应用到全局，不用粘贴。App 会提取里面的 --bg / --primary / --blue / --txt 等设计 token，全局换到按钮、卡片、Tab、进度条上。只粘 HTML 结构、里面一个颜色都没有是提取不出东西的，必须连同 <style> 一起粘进来。", color = theme.text, fontSize = 12.sp, lineHeight = 17.sp)
         Spacer(Modifier.height(6.dp))
         Text("注意：原生 App 跑不了整页 HTML 布局，能全局应用的是颜色与圆角这些 token；整页 HTML 请用浏览器打开预览。", color = theme.text, fontSize = 12.sp, lineHeight = 17.sp)
         Spacer(Modifier.height(14.dp))
@@ -515,6 +552,8 @@ private fun ThemePage(theme: NeuThemeColors, settings: SettingsStore, themeVm: T
                 summary = "已恢复默认柔影主题。"
             }, theme = theme, modifier = Modifier.weight(1f))
         }
+        Spacer(Modifier.height(10.dp))
+        NeuButton("📁 上传代码文件", onClick = { pickCodeFile.launch("*/*") }, theme = theme, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
         Text(summary, color = theme.blueDark, fontSize = 13.sp, lineHeight = 18.sp)
         Spacer(Modifier.height(14.dp))

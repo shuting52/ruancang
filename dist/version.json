@@ -1,7 +1,7 @@
 {
-  "versionCode": 10,
-  "versionName": "1.0.9",
-  "apkUrl": "https://raw.githubusercontent.com/shuting52/ruancang/main/dist/ruancang-v1.0.9-debug.apk",
+  "versionCode": 11,
+  "versionName": "1.1.0",
+  "apkUrl": "https://raw.githubusercontent.com/shuting52/ruancang/main/dist/ruancang-v1.1.0-debug.apk",
   "size": 15787345,
-  "changelog": "修 46MB 单文件上传中断：固定长度流式替代 chunked、超时放宽到 600 秒、上传进度实时更新、主文件自动重试 3 次、中断错误改中文提示。"
+  "changelog": "修 46MB 单文件上传死循环感：单文件阈值改回 10MB，超过即切块；每块单独重试 3 次，断了只重传这一块；unexpected end of stream 改中文提示；重试日志标明共 3 次、失败后已停止。"
 }

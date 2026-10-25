@@ -129,7 +129,7 @@ class GithubApi(private val config: GithubConfig) {
 
     /**
      * 重传清理（尽力而为，清理失败不影响本次上传结果）：
-     *  - 单传成功后，若该条目之前是分块形态，删掉旧的 parts/* 和 manifest.json，
+     *  - 单传成功后，若该条目之前是分块形态，删掉旧的 parts 目录和 manifest.json，
      *    否则仓库里会同时留着单个 APK 和旧分块，看着像两份；
      *  - 分块成功后，若该条目之前是单文件形态，删掉旧的单个文件。
      */

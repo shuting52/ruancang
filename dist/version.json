@@ -1,7 +1,7 @@
 {
-  "versionCode": 7,
-  "versionName": "1.0.6",
-  "apkUrl": "https://raw.githubusercontent.com/shuting52/ruancang/main/dist/ruancang-v1.0.6-debug.apk",
+  "versionCode": 8,
+  "versionName": "1.0.7",
+  "apkUrl": "https://raw.githubusercontent.com/shuting52/ruancang/main/dist/ruancang-v1.0.7-debug.apk",
   "size": 15770961,
-  "changelog": "修搜索不到已安装应用：QUERY_ALL_PACKAGES 去掉 30 上限并加 LAUNCHER 查询兜底，搜索去空格并显示搜到几个；更新弹窗删掉安装包大小那一行；主题解析支持 --primary 等别名、全部 style 块、rgb 颜色和 body/主按钮兜底，没识别到颜色时明说未变化。"
+  "changelog": "闪退加固：主题解析再怪也不闪退，解析失败退回默认主题；rgb 颜色值限幅；应用列表读取异常时返回空列表不闪退。"
 }

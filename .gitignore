@@ -1,0 +1,7 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.DS_Store
+# Token 绝不进仓库：本机设置只存在手机 SharedPreferences 里，不在源码里出现。

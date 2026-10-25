@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">软仓</string>
+    <style name="Theme.Ruancang" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#E0E8EF</item>
+        <item name="android:statusBarColor">#E0E8EF</item>
+        <item name="android:navigationBarColor">#E0E8EF</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

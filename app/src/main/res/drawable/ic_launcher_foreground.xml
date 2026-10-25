@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 自适应图标前景（占位版，与柔影主题同色）：
+  蓝色圆 + 金色点，呼应 icon/ruancang-icon.svg 里的配色。
+  正式图标以“软”字为核心，见 icon/ruancang-icon.svg（SVG，含软字形）：
+  Vector Drawable 不支持 <text>，所以请在 Figma / Illustrator 里把 SVG 的
+  “软”字转曲（Create Outlines）后，再用 Android Studio 的 Vector Asset
+  导入，替换本文件，即可得到带软字形的启动器图标。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- 蓝色主圆 -->
+    <path
+        android:fillColor="#5F9DE7"
+        android:pathData="M54,18 a36,36 0 1,1 -0.01,0 Z" />
+    <!-- 白色柔影弧（近似“软”的柔和感） -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,58 Q54,42 76,58 Q54,66 32,58 Z" />
+    <!-- 金色点缀 -->
+    <path
+        android:fillColor="#F0A93C"
+        android:pathData="M78,78 a7,7 0 1,1 -0.01,0 Z" />
+</vector>

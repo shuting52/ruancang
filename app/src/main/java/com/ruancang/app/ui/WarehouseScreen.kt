@@ -496,7 +496,7 @@ private fun ThemePage(theme: NeuThemeColors, settings: SettingsStore, themeVm: T
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
         NeuTitle("自定义主题代码", theme)
         Spacer(Modifier.height(6.dp))
-        Text("把 HTML / CSS 代码粘贴进来，点“应用”：App 会提取里面的 --bg / --blue / --txt 等设计 token，全局换到按钮、卡片、Tab、进度条上。", color = theme.text, fontSize = 12.sp, lineHeight = 17.sp)
+        Text("把 HTML / CSS 代码粘贴进来，点“应用”：App 会提取里面的 --bg / --primary / --blue / --txt 等设计 token，全局换到按钮、卡片、Tab、进度条上。只粘 HTML 结构、里面一个颜色都没有是提取不出东西的，必须连同 <style> 一起粘进来。", color = theme.text, fontSize = 12.sp, lineHeight = 17.sp)
         Spacer(Modifier.height(6.dp))
         Text("注意：原生 App 跑不了整页 HTML 布局，能全局应用的是颜色与圆角这些 token；整页 HTML 请用浏览器打开预览。", color = theme.text, fontSize = 12.sp, lineHeight = 17.sp)
         Spacer(Modifier.height(14.dp))

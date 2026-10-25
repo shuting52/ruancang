@@ -17,7 +17,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.ruancang.app.data.NeuThemeColors
 import com.ruancang.app.data.UpdateInfo
-import com.ruancang.app.model.formatSize
 
 /** 把更新日志拆成条目：先按换行，再按中文分号；单条过长时按句号拆。 */
 fun changelogItems(changelog: String): List<String> {
@@ -58,10 +57,8 @@ fun UpdateDialog(
                 Text("🎉 发现新版本 ${info.versionName}", color = theme.textDark, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 Spacer(Modifier.height(8.dp))
                 Text("当前 $currentVersionName  →  新版 ${info.versionName}（code ${info.versionCode}）", color = theme.textDark, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                if (info.size > 0) {
-                    Spacer(Modifier.height(4.dp))
-                    Text("安装包约 ${formatSize(info.size)} · 可直接覆盖安装，不用先卸载旧版", color = theme.textDark, fontSize = 13.sp)
-                }
+                // v1.0.6：用户要求删掉“安装包约…·可直接覆盖安装，不用先卸载旧版”这一行，
+                // 这里整段删掉，只留上面当前版 → 新版这一行。
                 val items = changelogItems(info.changelog)
                 if (items.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))

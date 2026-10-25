@@ -6,8 +6,22 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 选择文件走系统文件选择器（SAF），不需要 READ_EXTERNAL_STORAGE；
          已安装应用列表与 APK 路径走 PackageManager，不需要存储权限。 -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
-        android:maxSdkVersion="30" />
+    <!-- v1.0.6 修“搜不到已安装应用”：之前这里写了 maxSdkVersion="30"，
+         Android 12（API 31）及以上这条权限就被系统直接忽略，
+         PackageManager 只能看到系统应用和少量应用，用户应用大多被包可见性过滤掉，
+         搜索自然搜不到。去掉上限后，Android 11 及以上都能看到全部已安装应用。
+         这是软仓“把已安装应用上传到仓库”这个核心功能本身需要的权限，
+         不是为了收集信息：列表只在用户点“已安装应用”时现取现用，不上传、不留存。 -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <!-- 兜底：即使将来 QUERY_ALL_PACKAGES 被收紧，有桌面图标的应用
+         靠这条 LAUNCHER 查询声明仍能被 PackageManager 看到。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="true"

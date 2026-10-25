@@ -83,38 +83,79 @@ object ThemeParser {
         } catch (e: Exception) { null }
     }
 
-    private fun findVar(code: String, name: String): Color? {
-        // 匹配 --bg:#e0e8ef / --bg: #e0e8ef; / background:#e0e8ef 等写法
-        val regex = Regex("--$name\\s*:\\s*(#[0-9a-fA-F]{6})")
-        val m = regex.find(code) ?: return null
-        return hexToColor(m.groupValues[1])
+    private fun colorFromValue(value: String): Color? {
+        val v = value.trim()
+        if (v.startsWith("#")) {
+            if (v.length == 7) return hexToColor(v)
+            if (v.length == 4) {
+                val r = v[1].toString().repeat(2)
+                val g = v[2].toString().repeat(2)
+                val b = v[3].toString().repeat(2)
+                return hexToColor("#$r$g$b")
+            }
+            return null
+        }
+        val rgb = Regex("rgba?\\s*\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)").find(v) ?: return null
+        return try {
+            Color(rgb.groupValues[1].toInt(), rgb.groupValues[2].toInt(), rgb.groupValues[3].toInt())
+        } catch (e: Exception) { null }
     }
 
-    /**
-     * 解析用户粘贴的 HTML / CSS 代码。
-     * 能解析：:root 里的 --bg / --txt / --txt-d / --blue / --blue-d / --gold / --r，
-     * 以及 <style> 块里的同名变量。解析不到的项保持默认值。
-     *
-     * 诚实说明：原生 App 不能把一段 HTML 布局直接当成界面跑起来；
-     * 这里“全局应用”指的是把代码里的设计 token（颜色、圆角）提取出来，
-     * 全 App 的按钮、卡片、Tab、进度条立刻换成这套 token。
-     * 想要整页 HTML 效果，请用“主题”页的 WebView 预览（见 README）。
-     */
+    // v1.0.6 变量别名表。之前只认 --bg / --txt / --blue 等自家名字，
+    // 外面拷来的 CSS 常用 --primary / --background / --text-color 等名字，
+    // 一律认不到就等于没应用，这就是图三“应用全局没效果”的主因。
+    private val ALIASES: Map<String, List<String>> = mapOf(
+        "bg" to listOf("bg", "background", "background-color", "page-bg", "page-background", "surface", "app-bg"),
+        "txt" to listOf("txt", "text", "text-color", "font-color", "muted", "secondary", "body-color"),
+        "txt-d" to listOf("txt-d", "text-dark", "heading", "heading-color", "title", "title-color", "foreground"),
+        "blue" to listOf("blue", "primary", "primary-color", "main", "main-color", "accent", "accent-color", "brand", "brand-color", "link"),
+        "blue-d" to listOf("blue-d", "primary-dark", "primary-d", "accent-dark", "dark", "dark-color"),
+        "gold" to listOf("gold", "warning", "highlight", "amber", "yellow", "star")
+    )
+
+    private fun findVar(code: String, key: String): Color? {
+        for (name in ALIASES[key] ?: listOf(key)) {
+            val regex = Regex("--$name\\s*:\\s*([^;\\n}]+)")
+            val m = regex.find(code) ?: continue
+            colorFromValue(m.groupValues[1])?.let { return it }
+        }
+        return null
+    }
+
+    private fun findProp(code: String, selectorHint: String, prop: String): Color? {
+        val block = Regex("([^{}]*$selectorHint[^{}]*)\\{([^}]*)}")
+            .findAll(code).firstOrNull() ?: return null
+        val body = block.groupValues[2]
+        val m = Regex("$prop\\s*:\\s*(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|rgba?\\s*\\([^)]+\\))")
+            .find(body) ?: return null
+        return colorFromValue(m.groupValues[1])
+    }
+
     private fun luminance(c: Color): Float =
         0.299f * c.red + 0.587f * c.green + 0.114f * c.blue
 
+    fun hasCustomTokens(code: String): Boolean {
+        if (code.isBlank()) return false
+        val t = parse(code)
+        val d = NeuThemeColors.Default
+        return t.bg != d.bg || t.blue != d.blue || t.blueDark != d.blueDark ||
+            t.text != d.text || t.textDark != d.textDark || t.gold != d.gold ||
+            t.corner != d.corner
+    }
+
     fun parse(code: String): NeuThemeColors {
         if (code.isBlank()) return NeuThemeColors.Default
-        val style = Regex("<style[^>]*>(.*?)</style>", RegexOption.DOT_MATCHES_ALL)
-            .find(code)?.groupValues?.get(1) ?: code
-        val corner = Regex("--r\\s*:\\s*([0-9]+)px").find(style)
+        val styles = Regex("<style[^>]*>(.*?)</style>", RegexOption.DOT_MATCHES_ALL)
+            .findAll(code).map { it.groupValues[1] }.toList()
+        val style = if (styles.isNotEmpty()) styles.joinToString("\n") else code
+        val corner = Regex("--(?:r|radius|border-radius|corner)\\s*:\\s*([0-9]+)px").find(style)
             ?.groupValues?.get(1)?.toFloatOrNull() ?: NeuThemeColors.Default.corner
-        val bg = findVar(style, "bg") ?: NeuThemeColors.Default.bg
+        val bg = findVar(style, "bg")
+            ?: findProp(style, "body", "background-color")
+            ?: findProp(style, "body", "background")
+            ?: NeuThemeColors.Default.bg
         var text = findVar(style, "txt") ?: NeuThemeColors.Default.text
         var textDark = findVar(style, "txt-d") ?: NeuThemeColors.Default.textDark
-        // v1.0.1：文字/背景冲突的兜底。只改了背景没改文字时，
-        // 深底配深字、浅底配浅字都会看不清，这里按背景亮度强制拉开对比：
-        // 深底 -> 文字一律提亮，浅底 -> 过浅的深色字压回默认深色。
         if (luminance(bg) < 0.45f) {
             if (luminance(text) < 0.6f) text = Color(0xFFC7D6E8)
             if (luminance(textDark) < 0.6f) textDark = Color(0xFFF2F7FC)
@@ -122,20 +163,29 @@ object ThemeParser {
             if (luminance(textDark) > 0.6f) textDark = NeuThemeColors.Default.textDark
             if (luminance(text) > 0.85f) text = NeuThemeColors.Default.text
         }
+        val blue = findVar(style, "blue")
+            ?: findProp(style, "primary", "background")
+            ?: findProp(style, "btn", "background")
+            ?: findProp(style, "button", "background")
+            ?: NeuThemeColors.Default.blue
         return NeuThemeColors(
             bg = bg,
             text = text,
             textDark = textDark,
-            blue = findVar(style, "blue") ?: NeuThemeColors.Default.blue,
+            blue = blue,
             blueDark = findVar(style, "blue-d") ?: NeuThemeColors.Default.blueDark,
             gold = findVar(style, "gold") ?: NeuThemeColors.Default.gold,
             corner = corner
         )
     }
 
-    /** 解析结果摘要，供“主题”页展示“应用后识别到了什么”。 */
     fun summary(code: String): String {
         if (code.isBlank()) return "未输入自定义代码，当前为默认柔影主题。"
+        if (!hasCustomTokens(code)) {
+            return "未识别到任何颜色变量：这段代码里没有 --bg / --primary 这类颜色变量，" +
+                "也没有 body / 主按钮的背景色，全局没有变化。请连同 <style> 一起粘进来，" +
+                "或在代码里加 :root { --bg:#e0e8ef; --blue:#5f9de7; --txt:#7e97b8; } 再应用。"
+        }
         val t = parse(code)
         fun hex(c: Color): String {
             val r = (c.red * 255).toInt()

@@ -311,13 +311,20 @@ private fun AppPicker(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val apps = remember(includeSystem) { listInstalledApps(context, includeSystem) }
+    // v1.0.6：列表按包名去重（同一应用多用户/多版本时 PackageManager 可能返回重复条目，
+    // 重复条目会让搜索结果看起来乱、也让总数虚高）。
+    val apps = remember(includeSystem) {
+        listInstalledApps(context, includeSystem).distinctBy { it.packageName }
+    }
     var query by remember { mutableStateOf("") }
     val filtered = remember(apps, query) {
-        if (query.isBlank()) apps else apps.filter {
-            it.displayName.contains(query, ignoreCase = true) ||
-                it.label.contains(query, ignoreCase = true) ||
-                it.packageName.contains(query, ignoreCase = true)
+        // v1.0.6：搜索先去空格再比对，且把名字里的空格也去掉再比，
+        // 否则“Android Services”搜“AndroidServices”、或输入带尾空格时就搜不到。
+        val q = query.trim().replace(" ", "").lowercase()
+        if (q.isBlank()) apps else apps.filter {
+            it.displayName.replace(" ", "").lowercase().contains(q) ||
+                it.label.replace(" ", "").lowercase().contains(q) ||
+                it.packageName.lowercase().contains(q)
         }
     }
     Column {
@@ -336,8 +343,16 @@ private fun AppPicker(
         Spacer(Modifier.height(4.dp))
         Text("系统应用原名多为英文，已按包名给常见系统应用配了中文名；没配到的仍显示原名。", color = theme.textDark, fontSize = 12.sp, lineHeight = 17.sp)
         Spacer(Modifier.height(10.dp))
+        Text(
+            if (query.isBlank()) "共 ${apps.size} 个应用" else "已搜到 ${filtered.size} 个（共 ${apps.size} 个）",
+            color = theme.textDark, fontSize = 12.sp
+        )
         if (filtered.isEmpty()) {
-            Text("没找到，换个关键词试试。", color = theme.textDark, fontSize = 13.sp)
+            Text(
+                "没找到：先确认要找的应用是不是已安装、以及上面是否勾了“含系统应用”；" +
+                    "如果它在列表里根本没有，点“返回”后用“选择文件”直接选它的 APK 文件上传，一样能进仓库。",
+                color = theme.textDark, fontSize = 13.sp, lineHeight = 18.sp
+            )
         }
         LazyColumn(
             modifier = Modifier.height(420.dp),

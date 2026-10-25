@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 自更新：旧版里下载新版后走系统安装器，需要这个权限声明 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 选择文件走系统文件选择器（SAF），不需要 READ_EXTERNAL_STORAGE；
          已安装应用列表与 APK 路径走 PackageManager，不需要存储权限。 -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"

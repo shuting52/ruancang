@@ -22,9 +22,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import android.content.Intent
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,16 +36,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.ruancang.app.data.GithubApi
 import com.ruancang.app.data.GithubFile
 import com.ruancang.app.data.NeuThemeColors
+import com.ruancang.app.data.SelfDownloader
 import com.ruancang.app.data.SettingsStore
 import com.ruancang.app.data.ThemeParser
 import com.ruancang.app.data.ThemeViewModel
+import com.ruancang.app.data.UpdateChecker
+import com.ruancang.app.data.UpdateInfo
+import com.ruancang.app.data.currentAppVersion
 import com.ruancang.app.model.Category
+import com.ruancang.app.model.formatSize
+import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,6 +70,46 @@ fun WarehouseScreen(
     var tab by remember { mutableStateOf(Tab.WAREHOUSE) }
     var showUpload by remember { mutableStateOf(false) }
     val config = remember(tab) { settings.githubConfig }
+    // v1.0.2 自更新状态：启动时静默查一次，设置页也可手动查。
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val (currentCode, currentName) = remember { currentAppVersion(context) }
+    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+    var updateProgress by remember { mutableStateOf(0f) }
+    var updateProgressText by remember { mutableStateOf("") }
+    var updateDownloading by remember { mutableStateOf(false) }
+    var updateDownloaded by remember { mutableStateOf(false) }
+    var updateStatus by remember { mutableStateOf("") }
+    var updateFile by remember { mutableStateOf<File?>(null) }
+    val updateCancelled = remember { AtomicBoolean(false) }
+
+    fun checkUpdate(showNoUpdate: Boolean) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val info = UpdateChecker.check(settings.githubConfig, currentCode)
+                withContext(Dispatchers.Main) {
+                    if (info != null) {
+                        updateInfo = info
+                        updateProgress = 0f
+                        updateProgressText = ""
+                        updateDownloading = false
+                        updateDownloaded = false
+                        updateStatus = ""
+                        updateFile = null
+                    } else if (showNoUpdate) {
+                        updateStatus = "已是最新版（当前 $currentName）。"
+                    }
+                }
+            } catch (e: Exception) {
+                if (showNoUpdate) {
+                    withContext(Dispatchers.Main) {
+                        updateStatus = "检查失败：${e.message}，稍后再试（不影响上传功能）。"
+                    }
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) { checkUpdate(false) }
 
     Box(modifier = Modifier.fillMaxSize().background(theme.bg)) {
         // v1.0.1：之前开了全屏沉浸却没留安全区，底部栏会被系统导航条盖住、
@@ -88,7 +139,11 @@ fun WarehouseScreen(
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when (tab) {
                     Tab.WAREHOUSE -> WarehousePage(theme, config, onUpload = { showUpload = true })
-                    Tab.SETTINGS -> SettingsPage(theme, settings)
+                    Tab.SETTINGS -> SettingsPage(
+                        theme, settings,
+                        updateStatus = updateStatus,
+                        onCheckUpdate = { checkUpdate(true) }
+                    )
                     Tab.THEME -> ThemePage(theme, settings, themeVm)
                 }
             }
@@ -121,6 +176,76 @@ fun WarehouseScreen(
             githubApi = GithubApi(cfg),
             tokenMissing = cfg.token.isBlank(),
             onClose = { showUpload = false }
+        )
+    }
+
+    // v1.0.2 自更新弹窗：有新版才出现，下载在旧版里完成，点安装走系统安装器。
+    val info = updateInfo
+    if (info != null) {
+        UpdateDialog(
+            theme = theme,
+            info = info,
+            currentVersionName = currentName,
+            progress = updateProgress,
+            progressText = updateProgressText,
+            downloading = updateDownloading,
+            downloaded = updateDownloaded,
+            status = updateStatus,
+            onDownload = {
+                updateCancelled.set(false)
+                updateDownloading = true
+                updateDownloaded = false
+                updateStatus = "正在下载新版…（断网/取消后重下可按段续传）"
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val dest = File(File(context.cacheDir, "update"), "ruancang-update.apk")
+                        val file = SelfDownloader.download(
+                            url = info.apkUrl,
+                            dest = dest,
+                            onProgress = { received, total ->
+                                if (total > 0) {
+                                    updateProgress = received.toFloat() / total.toFloat()
+                                    updateProgressText = "${formatSize(received)} / ${formatSize(total)}"
+                                } else {
+                                    updateProgressText = formatSize(received)
+                                }
+                            },
+                            isCancelled = { updateCancelled.get() }
+                        )
+                        withContext(Dispatchers.Main) {
+                            updateFile = file
+                            updateDownloading = false
+                            updateDownloaded = true
+                            updateProgress = 1f
+                            updateStatus = "下载完成，点“立即安装”。"
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            updateDownloading = false
+                            updateStatus = if (updateCancelled.get()) {
+                                "已取消，已下的段已保留，下次点更新可续传。"
+                            } else {
+                                "下载失败：${e.message}"
+                            }
+                        }
+                    }
+                }
+            },
+            onInstall = {
+                val file = updateFile ?: return@UpdateDialog
+                val uri = FileProvider.getUriForFile(context, "com.ruancang.app.fileprovider", file)
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            },
+            onCancel = {
+                updateCancelled.set(true)
+                updateDownloading = false
+            },
+            onClose = { updateInfo = null }
         )
     }
 }
@@ -229,7 +354,12 @@ private fun WarehousePage(
 }
 
 @Composable
-private fun SettingsPage(theme: NeuThemeColors, settings: SettingsStore) {
+private fun SettingsPage(
+    theme: NeuThemeColors,
+    settings: SettingsStore,
+    updateStatus: String = "",
+    onCheckUpdate: () -> Unit = {}
+) {
     var owner by remember { mutableStateOf(settings.githubConfig.owner) }
     var repo by remember { mutableStateOf(settings.githubConfig.repo) }
     var branch by remember { mutableStateOf(settings.githubConfig.branch) }
@@ -279,6 +409,17 @@ private fun SettingsPage(theme: NeuThemeColors, settings: SettingsStore) {
         }
         Spacer(Modifier.height(12.dp))
         Text("安全提醒：任何曾经出现在聊天记录、截图里的 Token 都应视为已泄露，去 GitHub Settings → Developer settings → Tokens 里吊销并换新，再粘贴到这里。", color = theme.text, fontSize = 12.sp, lineHeight = 17.sp)
+        Spacer(Modifier.height(20.dp))
+        NeuTitle("软件更新", theme)
+        Spacer(Modifier.height(6.dp))
+        Text("打开 App 时会自动查一次；也可以手动点下面。有新版会弹窗，在旧版里直接下载安装，不用去浏览器找链接。", color = theme.textDark, fontSize = 12.sp, lineHeight = 17.sp)
+        Spacer(Modifier.height(10.dp))
+        NeuButton("检查更新", onClick = onCheckUpdate, theme = theme, primary = true, modifier = Modifier.fillMaxWidth())
+        if (updateStatus.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Text(updateStatus, color = theme.textDark, fontSize = 13.sp, lineHeight = 18.sp)
+        }
+        Spacer(Modifier.height(20.dp))
     }
 }
 

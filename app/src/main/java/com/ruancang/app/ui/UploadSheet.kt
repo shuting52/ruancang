@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -29,8 +31,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -129,9 +133,9 @@ fun UploadWindow(
                         onPick = { app ->
                             source = app
                             category = Category.APPS
-                            if (title.isBlank()) title = app.label
+                            if (title.isBlank()) title = app.displayName
                             showAppPicker = false
-                            appendLog("已选应用：${app.label}（${app.packageName}，${app.versionName ?: ""}），类别固定为「应用」")
+                            appendLog("已选应用：${app.displayName}（${app.packageName}，${app.versionName ?: ""}），类别固定为「应用」")
                         },
                         onBack = { showAppPicker = false }
                     )
@@ -150,7 +154,7 @@ fun UploadWindow(
                                     color = theme.textDark, fontSize = 13.sp
                                 )
                                 is UploadSource.InstalledApp -> Text(
-                                    "应用：${s.label} · ${s.packageName} · ${s.versionName ?: ""} · APK ${formatSize(s.apkFile.length())}",
+                                    "应用：${s.displayName} · ${s.packageName} · ${s.versionName ?: ""} · APK ${formatSize(s.apkFile.length())}",
                                     color = theme.textDark, fontSize = 13.sp
                                 )
                                 null -> Text("还没选，上面两个入口二选一。", color = theme.text, fontSize = 13.sp)
@@ -167,10 +171,10 @@ fun UploadWindow(
                                 "当前：${category.emoji} ${category.label} → 仓库文件夹 ${category.folder}/",
                                 color = theme.blueDark, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                // 一行放不下全部类别时，LazyRow 更稳；这里用可换行近似：分两行芯片
-                            }
-                            Category.entries.chunked(4).forEach { row ->
+                            // v1.0.2：之前一行 4 个芯片，窄屏上第 4 个直接被裁到
+                            // 屏幕外，只剩右边一条竖直的空 pill（图二那个）。
+                            // 改成一行 3 个，9 个类别正好 3 行，不裁、不留空位。
+                            Category.entries.chunked(3).forEach { row ->
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     row.forEach { c ->
                                         NeuChip(
@@ -308,6 +312,14 @@ private fun AppPicker(
 ) {
     val context = LocalContext.current
     val apps = remember(includeSystem) { listInstalledApps(context, includeSystem) }
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(apps, query) {
+        if (query.isBlank()) apps else apps.filter {
+            it.displayName.contains(query, ignoreCase = true) ||
+                it.label.contains(query, ignoreCase = true) ||
+                it.packageName.contains(query, ignoreCase = true)
+        }
+    }
     Column {
         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
             Text("选择已安装应用（${apps.size} 个）", color = theme.textDark, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -320,15 +332,46 @@ private fun AppPicker(
             theme = theme
         )
         Spacer(Modifier.height(10.dp))
+        NeuField(query, { query = it }, "搜索应用", theme, placeholder = "搜中文名、原名或包名，如：微信、vivo")
+        Spacer(Modifier.height(4.dp))
+        Text("系统应用原名多为英文，已按包名给常见系统应用配了中文名；没配到的仍显示原名。", color = theme.textDark, fontSize = 12.sp, lineHeight = 17.sp)
+        Spacer(Modifier.height(10.dp))
+        if (filtered.isEmpty()) {
+            Text("没找到，换个关键词试试。", color = theme.textDark, fontSize = 13.sp)
+        }
         LazyColumn(
             modifier = Modifier.height(420.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(apps) { app ->
+            items(filtered) { app ->
                 NeuCard(theme = theme, onClick = { onPick(app) }) {
-                    Column {
-                        Text(app.label, color = theme.textDark, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("${app.packageName} · ${app.versionName ?: ""} · APK ${formatSize(app.apkFile.length())}", color = theme.text, fontSize = 12.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (app.icon != null) {
+                            Image(
+                                bitmap = app.icon.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp)
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(theme.blue, RoundedCornerShape(12.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    app.displayName.firstOrNull()?.toString() ?: "?",
+                                    color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp
+                                )
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(app.displayName, color = theme.textDark, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            if (app.displayName != app.label) {
+                                Text("原名：${app.label}", color = theme.textDark, fontSize = 12.sp)
+                            }
+                            Text("${app.packageName} · ${app.versionName ?: ""} · APK ${formatSize(app.apkFile.length())}", color = theme.textDark, fontSize = 12.sp)
+                        }
                     }
                 }
             }

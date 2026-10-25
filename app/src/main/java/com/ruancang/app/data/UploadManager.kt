@@ -177,7 +177,7 @@ class UploadManager(private val api: GithubApi) {
                 done = true
             } catch (e: java.io.IOException) {
                 lastError = e
-                onLog("上传中断（第 $attempt 次）：${friendlyNetworkError(e)}")
+                onLog("上传中断（第 $attempt 次，共 3 次）：${friendlyNetworkError(e)}")
                 if (attempt < 3) {
                     onLog("正在自动重试（第 ${attempt + 1} 次）…")
                     try { Thread.sleep(2000L * attempt) } catch (ignored: InterruptedException) {}
@@ -187,7 +187,7 @@ class UploadManager(private val api: GithubApi) {
         if (!done) {
             // 3 次都失败：把原始英文异常翻译成中文再抛，UI 不再直接显示
             // “Software caused connection abort”这种用户看不懂的原话。
-            throw IllegalStateException("上传中断：${friendlyNetworkError(lastError)}，已自动重试 3 次仍失败，请换个网络环境（或开/关 VPN）后再试一次。")
+            throw IllegalStateException("上传中断：${friendlyNetworkError(lastError)}，3 次重试都已用完，已停止，不会继续循环，请换个网络环境（或开/关 VPN）后再试一次。")
         }
         onLog("主文件已同步：$mainUrl")
 
@@ -243,10 +243,10 @@ class UploadManager(private val api: GithubApi) {
         onLog: (String) -> Unit
     ): String {
         onLog("开始上传主文件：$fileName" + if (totalSize > 0) "（${totalSize / 1024 / 1024} MB）" else "")
-        if (totalSize >= 90L * 1024 * 1024) {
-            onLog("超过 90 MB，自动切块上传（每块 10 MB），传完附 manifest.json")
+        if (totalSize >= 10L * 1024 * 1024) {
+            onLog("超过 10 MB，自动切块上传（每块 10 MB），传完附 manifest.json；每块断了只重传这一块")
         } else if (totalSize > 0) {
-            onLog("90 MB 以下直接存单个文件，仓库里就是原文件本身")
+            onLog("10 MB 以下直接存单个文件，仓库里就是原文件本身")
         }
         return api.uploadStream(
             basePath = basePath,
@@ -268,6 +268,8 @@ private fun friendlyNetworkError(e: Exception?): String {
             msg.contains("Connection reset", ignoreCase = true) ||
             msg.contains("Broken pipe", ignoreCase = true) ->
             "网络连接被重置（手机网络/VPN 到 GitHub 不稳定，中途被断掉）"
+        msg.contains("unexpected end of stream", ignoreCase = true) ->
+            "上传中途被服务器/网络掐断（文件没传完，仓库里没存下；单个大请求写太久最容易这样，10MB 切块就是为了解决它）"
         msg.contains("timeout", ignoreCase = true) || msg.contains("timed out", ignoreCase = true) ->
             "上传超时（网络太慢，46MB 没能在时限内写完）"
         msg.contains("Unable to resolve host", ignoreCase = true) ||

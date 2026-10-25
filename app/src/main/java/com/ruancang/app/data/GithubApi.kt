@@ -308,9 +308,13 @@ class GithubApi(private val config: GithubConfig) {
         message: String,
         onProgress: (uploaded: Long, total: Long) -> Unit
     ): String {
-        val singleThreshold = 90L * 1024 * 1024
+        // v1.1.0：单文件阈值从 90MB 改回 10MB。教训：46MB 单个 PUT 在用户手机网络上
+        // 三次都以 unexpected end of stream 断掉——单个长请求写太久，中间任何一次
+        // 网络抖动或服务器/代理超时掐断，整个文件就得重来；10MB 一块的请求短得多，
+        // 之前这同一个嗨小葩文件就是靠切块成功进仓库的。单文件只留给真正小的文件。
+        val singleThreshold = 10L * 1024 * 1024
         if (totalSize < singleThreshold) {
-            // 90MB 以下：直接流式传单个文件，仓库里就是原 APK 文件。
+            // 10MB 以下：直接流式传单个文件，仓库里就是原 APK 文件。
             val url = uploadStreamed("$basePath/$fileName", input, message, totalSize, onProgress).getOrThrow()
             onProgress(totalSize, totalSize)
             cleanupStaleChunked(basePath, fileName)
@@ -332,7 +336,20 @@ class GithubApi(private val config: GithubConfig) {
             }
             if (len == 0) break
             val partName = "part-%03d".format(partIndex)
-            uploadStreamed("$basePath/parts/$partName", java.io.ByteArrayInputStream(buf, 0, len), "$message (part $partIndex)").getOrThrow()
+            // v1.1.0：每块单独重试 3 次。块内容已在 buf 里，重试时只要重开一个
+            // ByteArrayInputStream，不用重读文件；某一块断了只重传这一块，
+            // 不会像单文件那样整文件重来，更不会让外层整文件重试再从第 1 块开始。
+            var partAttempt = 0
+            while (true) {
+                partAttempt++
+                try {
+                    uploadStreamed("$basePath/parts/$partName", java.io.ByteArrayInputStream(buf, 0, len), "$message (part $partIndex)").getOrThrow()
+                    break
+                } catch (e: java.io.IOException) {
+                    if (partAttempt >= 3) throw e
+                    try { Thread.sleep(2000L * partAttempt) } catch (ignored: InterruptedException) {}
+                }
+            }
             partNames += partName
             digests += sha256Hex(buf, len)
             uploaded += len

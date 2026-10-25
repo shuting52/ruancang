@@ -1,7 +1,7 @@
 {
-  "versionCode": 9,
-  "versionName": "1.0.8",
-  "apkUrl": "https://raw.githubusercontent.com/shuting52/ruancang/main/dist/ruancang-v1.0.8-debug.apk",
-  "size": 15770961,
-  "changelog": "修 1.0.6 打开就闪退：主题解析改按规则切分的线性扫描，无 style 块时不扫全文，style 超 100KB 只取前 100KB；解析失败仍退回默认主题。"
+  "versionCode": 10,
+  "versionName": "1.0.9",
+  "apkUrl": "https://raw.githubusercontent.com/shuting52/ruancang/main/dist/ruancang-v1.0.9-debug.apk",
+  "size": 15787345,
+  "changelog": "修 46MB 单文件上传中断：固定长度流式替代 chunked、超时放宽到 600 秒、上传进度实时更新、主文件自动重试 3 次、中断错误改中文提示。"
 }

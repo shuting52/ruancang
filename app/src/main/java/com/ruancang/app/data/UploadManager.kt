@@ -150,9 +150,44 @@ class UploadManager(private val api: GithubApi) {
         val basePath = "${target.category.folder}/$slug"
         onLog("类别：${target.category.label}（${target.category.folder}/），目录：$basePath")
 
-        val mainUrl: String
-        inputStream.use { stream ->
-            mainUrl = uploadMain(stream, basePath, fileName, totalSize, onProgress, onLog)
+        // v1.0.9：主文件上传自动重试 3 次。以前主文件是一次 HTTP PUT，
+        // 46MB 写到一半被“Software caused connection abort”断掉，
+        // 整个文件就要用户手动再点一次上传，而且进度一直停在 0%。
+        // 现在失败的是 IOException（连接中断/超时/断网）就自动重开文件流再传，
+        // 每次重开是因为上一轮的 InputStream 已经消费完、不能复用；
+        // 非 IO 错误（比如 HTTP 422、仓库/权限问题）不重试，直接报错。
+        // 注意：最开始打开的那条 inputStream 在这里直接关掉，
+        // 后续每轮都按来源重新打开，避免“流已关闭”误报。
+        inputStream.close()
+        var mainUrl = ""
+        var lastError: Exception? = null
+        var attempt = 0
+        var done = false
+        while (attempt < 3 && !done) {
+            attempt++
+            try {
+                val freshStream = when (source) {
+                    is UploadSource.FileUri -> context.contentResolver.openInputStream(source.uri)
+                        ?: throw IllegalStateException("打不开这个文件，请重新选一次")
+                    is UploadSource.InstalledApp -> FileInputStream(source.apkFile)
+                }
+                freshStream.use { stream ->
+                    mainUrl = uploadMain(stream, basePath, fileName, totalSize, onProgress, onLog)
+                }
+                done = true
+            } catch (e: java.io.IOException) {
+                lastError = e
+                onLog("上传中断（第 $attempt 次）：${friendlyNetworkError(e)}")
+                if (attempt < 3) {
+                    onLog("正在自动重试（第 ${attempt + 1} 次）…")
+                    try { Thread.sleep(2000L * attempt) } catch (ignored: InterruptedException) {}
+                }
+            }
+        }
+        if (!done) {
+            // 3 次都失败：把原始英文异常翻译成中文再抛，UI 不再直接显示
+            // “Software caused connection abort”这种用户看不懂的原话。
+            throw IllegalStateException("上传中断：${friendlyNetworkError(lastError)}，已自动重试 3 次仍失败，请换个网络环境（或开/关 VPN）后再试一次。")
         }
         onLog("主文件已同步：$mainUrl")
 
@@ -222,5 +257,22 @@ class UploadManager(private val api: GithubApi) {
         ) { uploaded, total ->
             if (total > 0) onProgress(uploaded.toFloat() / total.toFloat()) else onProgress(0f)
         }.getOrThrow()
+    }
+}
+
+/** 把网络异常翻译成中文，UI 直接显示这句，不再显示英文原话。 */
+private fun friendlyNetworkError(e: Exception?): String {
+    val msg = e?.message ?: ""
+    return when {
+        msg.contains("Software caused connection abort", ignoreCase = true) ||
+            msg.contains("Connection reset", ignoreCase = true) ||
+            msg.contains("Broken pipe", ignoreCase = true) ->
+            "网络连接被重置（手机网络/VPN 到 GitHub 不稳定，中途被断掉）"
+        msg.contains("timeout", ignoreCase = true) || msg.contains("timed out", ignoreCase = true) ->
+            "上传超时（网络太慢，46MB 没能在时限内写完）"
+        msg.contains("Unable to resolve host", ignoreCase = true) ||
+            msg.contains("UnknownHost", ignoreCase = true) ->
+            "解析不到 GitHub 服务器（DNS/网络不通）"
+        else -> "网络错误：$msg"
     }
 }

@@ -186,32 +186,61 @@ class GithubApi(private val config: GithubConfig) {
     }
 
     /**
-     * 流式上传一个文件：Base64 按 24KB 一块边读边编码边写出，不在内存里
+     * 流式上传一个文件：Base64 按 96KB 一块边读边编码边写出，不在内存里
      * 拼整段 Base64 字符串、不拼整个 JSON 字符串。
      *
      * v1.0.3 修 OOM 的关键：旧版对 45MB 一块调用 Base64.encodeToString，
-     * 那一次分配正好是 45MB/3*4 个字符 × 2 字节 = 125,829,136 字节，
-     * 和用户报错截图里的数字一字不差；再加上同时在内存里的
-     * 首块 45MB + 当前块 45MB + 下一块 45MB，256MB 堆直接爆掉。
-     * 现在每块只占 24KB 编码缓冲，chunk 也从 45MB 降到 10MB，
-     * 大文件（130MB 的应用 APK）上传时峰值内存只有十几 MB。
-     * 用 chunked streaming，不让 HttpURLConnection 把整个请求体再缓冲一遍。
+     * 那一次分配正好是 45MB/3*4 个字符 x 2 字节 = 125,829,136 字节。
+     * 现在每块只占 96KB 编码缓冲，峰值内存只有十几 MB。
+     *
+     * v1.0.9 修“46MB 单文件上传 0% 后 Software caused connection abort”：
+     *  1. 大小已知时改用固定长度流式（setFixedLengthStreamingMode），
+     *     请求头里直接带 Content-Length，不再用 chunked 分块传输。
+     *     GitHub 的网关对 chunked 大请求体并不友好，46MB 一路 chunked 写过去
+     *     很容易在中途被网关/代理直接断掉；固定长度让服务端一开始就知道
+     *     总长，也不会再把整个请求体缓冲一遍。
+     *  2. 超时从 120 秒放宽到 600 秒：手机上传 46MB 到 GitHub 本来就慢，
+     *     慢网络下 120 秒根本不够写完，超时也会表现为连接中断。
+     *  3. 流式进度回调：以前单文件是传完才调一次 onProgress，
+     *     所以界面上一直是 0%，看着像卡死；现在每读一块就回调一次，
+     *     进度条会实时往前走。
      */
-    fun uploadStreamed(path: String, input: InputStream, message: String): Result<String> = runCatching {
+    fun uploadStreamed(
+        path: String,
+        input: InputStream,
+        message: String,
+        totalSize: Long = -1,
+        onProgress: ((uploaded: Long, total: Long) -> Unit)? = null
+    ): Result<String> = runCatching {
         val sha = existingSha(path)
         val conn = open("PUT", "https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodePath(path)}")
         conn.doOutput = true
-        conn.setChunkedStreamingMode(0)
+        conn.connectTimeout = 30_000
+        conn.readTimeout = 600_000
         conn.setRequestProperty("Content-Type", "application/json")
+        // 先把请求头拼出来，才能算固定长度。注意：header 里已含 sha（更新时），
+        // 所以固定长度必须在拼完 header 之后算，不能先算。
+        val headerBuilder = StringBuilder()
+            .append("{\"message\":").append(JSONObject.quote(message))
+            .append(",\"branch\":").append(JSONObject.quote(config.branch))
+        if (sha != null) headerBuilder.append(",\"sha\":").append(JSONObject.quote(sha))
+        headerBuilder.append(",\"content\":\"")
+        val headerBytes = headerBuilder.toString().toByteArray(Charsets.UTF_8)
+        val footerBytes = "\"}".toByteArray(Charsets.UTF_8)
+        if (totalSize > 0) {
+            val base64Len = (totalSize + 2) / 3 * 4
+            val totalLen = headerBytes.size.toLong() + base64Len + footerBytes.size
+            // HttpURLConnection 的固定长度模式要求长度精确等于实际写出的字节数；
+            // 输入流长度与 totalSize 不一致时会在写出时抛异常，由调用方重试处理。
+            conn.setFixedLengthStreamingMode(totalLen)
+        } else {
+            conn.setChunkedStreamingMode(0)
+        }
         conn.outputStream.use { out ->
-            val header = StringBuilder()
-                .append("{\"message\":").append(JSONObject.quote(message))
-                .append(",\"branch\":").append(JSONObject.quote(config.branch))
-            if (sha != null) header.append(",\"sha\":").append(JSONObject.quote(sha))
-            header.append(",\"content\":\"")
-            out.write(header.toString().toByteArray(Charsets.UTF_8))
+            out.write(headerBytes)
             // Base64 必须是 3 字节一组的倍数块编码，最后一块才带 padding。
-            val block = ByteArray(3 * 8192)
+            val block = ByteArray(3 * 32768)
+            var readTotal = 0L
             while (true) {
                 var len = 0
                 while (len < block.size) {
@@ -226,9 +255,11 @@ class GithubApi(private val config: GithubConfig) {
                     Base64.encodeToString(block.copyOf(len), Base64.NO_WRAP)
                 }
                 out.write(encoded.toByteArray(Charsets.UTF_8))
+                readTotal += len
+                if (totalSize > 0) onProgress?.invoke(readTotal, totalSize)
                 if (len < block.size) break
             }
-            out.write("\"}".toByteArray(Charsets.UTF_8))
+        val footerBytes = "\"}".toByteArray(Charsets.UTF_8)
             out.flush()
         }
         val body = readBody(conn)
@@ -280,7 +311,7 @@ class GithubApi(private val config: GithubConfig) {
         val singleThreshold = 90L * 1024 * 1024
         if (totalSize < singleThreshold) {
             // 90MB 以下：直接流式传单个文件，仓库里就是原 APK 文件。
-            val url = uploadStreamed("$basePath/$fileName", input, message).getOrThrow()
+            val url = uploadStreamed("$basePath/$fileName", input, message, totalSize, onProgress).getOrThrow()
             onProgress(totalSize, totalSize)
             cleanupStaleChunked(basePath, fileName)
             return url

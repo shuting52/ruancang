@@ -1,7 +1,7 @@
 {
-  "versionCode": 4,
-  "versionName": "1.0.3",
-  "apkUrl": "https://raw.githubusercontent.com/shuting52/ruancang/main/dist/ruancang-v1.0.3-debug.apk",
-  "size": 15739294,
-  "changelog": "修大文件上传 OOM：Base64 流式编码、分块 10MB、图标缩到 128px；截图也改流式上传。"
+  "versionCode": 5,
+  "versionName": "1.0.4",
+  "apkUrl": "https://raw.githubusercontent.com/shuting52/ruancang/main/dist/ruancang-v1.0.4-debug.apk",
+  "size": 15770961,
+  "changelog": "固定签名 V1+V2+V3，新版可直接覆盖安装，不用先卸载；Token 加密存储并默认以 **** 遮挡；主题代码可上传到仓库并在线拉回应用；更新弹窗内容改成条目式，下载完自动打开安装器，装完下次启动自动清理残留 APK。"
 }
